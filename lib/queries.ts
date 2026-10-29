@@ -1,5 +1,6 @@
 import "server-only";
 import { cacheLife, cacheTag } from "next/cache";
+import { getCatalogFallback, hasDatabaseUrl } from "./catalog-fallback";
 import { sql } from "./db";
 import type { Category, Product } from "./shop";
 
@@ -13,7 +14,7 @@ const PRODUCT_SELECT = `
   join categories c on c.slug = p.category_slug
   where p.active`;
 
-export async function getCategories() {
+async function getCategoriesFromDb() {
   "use cache";
   cacheTag(CATALOG_TAG);
   cacheLife("max");
@@ -27,11 +28,7 @@ export async function getCategories() {
     order by c.position, c.name`) as Category[];
 }
 
-export async function getCategory(slug: string) {
-  return (await getCategories()).find((c) => c.slug === slug);
-}
-
-export async function getProducts(categorySlug?: string) {
+async function getProductsFromDb(categorySlug?: string) {
   "use cache";
   cacheTag(CATALOG_TAG);
   cacheLife("max");
@@ -39,6 +36,23 @@ export async function getProducts(categorySlug?: string) {
   return (await (categorySlug
     ? sql.query(`${PRODUCT_SELECT} and p.category_slug = $1 order by p.id`, [categorySlug])
     : sql.query(`${PRODUCT_SELECT} order by p.id`))) as Product[];
+}
+
+export async function getCategories() {
+  if (!hasDatabaseUrl()) return (await getCatalogFallback()).categories;
+  return getCategoriesFromDb();
+}
+
+export async function getCategory(slug: string) {
+  return (await getCategories()).find((c) => c.slug === slug);
+}
+
+export async function getProducts(categorySlug?: string) {
+  if (!hasDatabaseUrl()) {
+    const { products } = await getCatalogFallback();
+    return categorySlug ? products.filter((p) => p.categorySlug === categorySlug) : products;
+  }
+  return getProductsFromDb(categorySlug);
 }
 
 export async function getFeaturedProducts() {
